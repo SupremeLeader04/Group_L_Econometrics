@@ -104,8 +104,7 @@ formula = psid_work_hours ~ Texp_group3 +
   democrat_gov_mis + PovertyRate_mis + AFDCTANFRecipients_mis
 
 # --- Estimate with weights and clustered SEs
-reg2 <- lm(formula, data = cleaned, weights = lon_weight)
-cluster_vcov <- vcovCL(reg2, cluster = ~state)
+reg2 <- lm(formula, data = cleaned, weights = lon_weight, clusters = state)
 
 # --- Extract treatment coefficients
 coef_table <- tidy(reg2, conf.int = TRUE, vcov = cluster_vcov)
@@ -123,23 +122,22 @@ list(
   dependent_variable_mean = dep_mean
 )
 
-# reg2 = lm(formula, data=cleaned, weights=lon_weight)
-# cluster_vcov = vcovCL(reg2, cluster = ~state)
+
 # coef_table = tidy(reg2, conf.int = TRUE, vcov = cluster_vcov)
 # coef_treat = subset(coef_table, grepl("Texp_group3", term))
-# coef_treat$group = gsub("factor\\(Texp_group3\\)", "", coef_treat$term)
-# coef_treat$group = gsub("_", " ", coef_treat$group)
-# 
-# p = ggplot(coef_treat, aes(x = group, y = estimate)) +
-#   geom_hline(yintercept = 0, color = "black") +
-#   geom_line(aes(group = 1), color = "steelblue", size = 1) +
-#   geom_point(size = 2, color = "steelblue") +
-#   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "steelblue") +
-#   labs(
-#     x = NULL,
-#     y = "Coefficient on Texp_group3",
-#     title = "Figure 1 Panel A – Mothers of College-Age Children"
-#   ) +
-#   theme_minimal()
-# p
+coef_treat$group = gsub("factor\\(Texp_group3\\)", "", coef_treat$term)
+coef_treat$group = gsub("_", " ", coef_treat$group)
+
+p = ggplot(coef_treat, aes(x = group, y = estimate)) +
+   geom_hline(yintercept = 0, color = "black") +
+   geom_line(aes(group = 1), color = "steelblue", size = 1) +
+   geom_point(size = 2, color = "steelblue") +
+   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "steelblue") +
+   labs(
+     x = NULL,
+     y = "Coefficient on Texp_group3",
+     title = "Figure 1 Panel A – Mothers of College-Age Children"
+   ) +
+   theme_minimal()
+p
 ```
