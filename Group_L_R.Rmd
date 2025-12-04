@@ -1,0 +1,145 @@
+---
+title: "Group L - R Code"
+author: "Me"
+date: "2025-11-30"
+output: pdf_document
+---
+
+```{r Loading Libraries and Data}
+library(haven)
+library(dplyr)
+library(clubSandwich)
+library(lmtest)
+library(broom)
+library(ggplot2)
+dat = read_dta("data_analysis1.dta")
+dat
+```
+
+```{r Initial Data Manipulations}
+dat = dat %>% mutate(
+  pre_unb = (Texp_group >= -12) & (Texp_group <= -3),
+  post_unb = (Texp_group >= 7) & (Texp_group <= 12),
+  post_bal = (Texp_group >= 1) & (Texp_group <= 6),
+  post_2 = (Texp_group >= 1) & (Texp_group <= 2),
+  post_unb2 = (Texp_group >= 3) & (Texp_group <= 12),
+  post_b1 = (Texp_group >= 1) & (Texp_group <= 2),
+  post_b2 = (Texp_group >= 3) & (Texp_group <= 4),
+  post_b3 = (Texp_group >= 5) & (Texp_group <= 6),
+  ch_young_2633 = (ch_young_age >= 26) & (ch_young_age <= 33),
+  age_psid = if_else(age_psid == 0, NA_real_, age_psid)
+)
+
+dat = dat %>%
+  group_by(person_id) %>%
+  mutate(junkcol = max(colever_ch19, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r Building Table 3 - Panel A}
+cleaned = dat %>% subset(
+  state != "Arkansas" &
+  child_1923_cah == 1 &
+  sex_psid == 2 &
+  ((relation_hh == 10) | (relation_hh == 20)) &
+  year >= 1988 &
+  year <= 2015 &
+  age_psid <= 64
+) %>%
+  mutate(
+    Texp_group3 = relevel(factor(Texp_group3), ref = "0"),
+    age_psid = relevel(factor(age_psid), ref = "40"),
+    white_psid_mis = as.numeric(is.na(white_psid)),
+    educ_psid_mis = as.numeric(is.na(educ_psid)),
+    age_psid_mis = as.numeric(is.na(age_psid)),
+    marital_status_psid_mis = as.numeric(is.na(marital_status_psid)),
+    numkids_psid_mis = as.numeric(is.na(numkids_psid)),
+    head_hh_psid_mis = as.numeric(is.na(head_hh_psid)),
+    needsp_mis = as.numeric(is.na(needsp)),
+    tuition_state_public4_mis = as.numeric(is.na(tuition_state_public4)),
+    tuition_state_public2_mis = as.numeric(is.na(tuition_state_public2)),
+    unemprate_mis = as.numeric(is.na(unemprate)),
+    log_revenue_pp_mis = as.numeric(is.na(log_revenue_pp)),
+    mn_wage_mis = as.numeric(is.na(mn_wage)),
+    democrat_gov_mis = as.numeric(is.na(democrat_gov)),
+    PovertyRate_mis = as.numeric(is.na(PovertyRate)),
+    AFDCTANFRecipients_mis = as.numeric(is.na(AFDCTANFRecipients))
+  )
+
+reg = lm(psid_work_hours ~ pre_unb + post_unb + post_bal + factor(state) + factor(year), data=cleaned, weights=lon_weight)
+
+ct = vcovCR(reg, cluster=cleaned$state, type="CR1")
+robust_res = coeftest(reg, vcov = ct)
+
+pretreat_mean = weighted.mean(
+  cleaned$psid_work_hours[cleaned$Texp_group == 0 & cleaned$strong == 1],
+  cleaned$lon_weight[cleaned$Texp_group == 0 & cleaned$strong == 1],
+  na.rm = TRUE
+)
+
+coef_post = robust_res["post_balTRUE", 1]
+se_post = robust_res["post_balTRUE", 2]
+
+cat("Table 3. Effect of merit aid on employment\n")
+cat("Dependent variable: annual hours of work\n\n")
+cat("After merit aid:", round(coef_post, 1), "\n")
+cat("[", round(se_post, 2), "]\n")
+cat("Observations:", nobs(reg), "\n")
+cat("Pre-treatment mean:", round(pretreat_mean, 0), "\n")
+```
+
+```{r Building Figure 1 - Panel A}
+formula = psid_work_hours ~ Texp_group3 +
+  factor(state) + factor(year) +
+  white_psid + factor(educ_psid) + factor(age_psid) +
+  factor(marital_status_psid) +
+  numkids_psid + head_hh_psid +
+  white_psid_mis + educ_psid_mis + age_psid_mis +
+  marital_status_psid_mis + numkids_psid_mis + head_hh_psid_mis +
+  needsp_mis + tuition_state_public4 + tuition_state_public2 +
+  needsp + tuition_state_public4_mis + tuition_state_public2_mis +
+  unemprate + log_revenue_pp + mn_wage + democrat_gov +
+  PovertyRate + AFDCTANFRecipients +
+  unemprate_mis + log_revenue_pp_mis + mn_wage_mis +
+  democrat_gov_mis + PovertyRate_mis + AFDCTANFRecipients_mis
+
+# --- Estimate with weights and clustered SEs
+reg2 <- lm(formula, data = cleaned, weights = lon_weight)
+cluster_vcov <- vcovCL(reg2, cluster = ~state)
+
+# --- Extract treatment coefficients
+coef_table <- tidy(reg2, conf.int = TRUE, vcov = cluster_vcov)
+coef_treat <- subset(coef_table, grepl("Texp_group3", term))
+
+# --- Add dependent variable mean
+dep_mean <- weighted.mean(
+  cleaned$psid_work_hours[cleaned$Texp_group3 == 0 & cleaned$strong == 1],
+  w = cleaned$lon_weight[cleaned$Texp_group3 == 0 & cleaned$strong == 1],
+  na.rm = TRUE
+)
+
+list(
+  treatment_effects = coef_treat,
+  dependent_variable_mean = dep_mean
+)
+
+# reg2 = lm(formula, data=cleaned, weights=lon_weight)
+# cluster_vcov = vcovCL(reg2, cluster = ~state)
+# coef_table = tidy(reg2, conf.int = TRUE, vcov = cluster_vcov)
+# coef_treat = subset(coef_table, grepl("Texp_group3", term))
+# coef_treat$group = gsub("factor\\(Texp_group3\\)", "", coef_treat$term)
+# coef_treat$group = gsub("_", " ", coef_treat$group)
+# 
+# p = ggplot(coef_treat, aes(x = group, y = estimate)) +
+#   geom_hline(yintercept = 0, color = "black") +
+#   geom_line(aes(group = 1), color = "steelblue", size = 1) +
+#   geom_point(size = 2, color = "steelblue") +
+#   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "steelblue") +
+#   labs(
+#     x = NULL,
+#     y = "Coefficient on Texp_group3",
+#     title = "Figure 1 Panel A – Mothers of College-Age Children"
+#   ) +
+#   theme_minimal()
+# p
+```
