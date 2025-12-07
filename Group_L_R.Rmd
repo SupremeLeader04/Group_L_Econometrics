@@ -9,6 +9,7 @@ output: pdf_document
 library(haven)
 library(dplyr)
 library(clubSandwich)
+library(lmtest)
 library(ggplot2)
 dat = read_dta("data_analysis1.dta")
 dat
@@ -123,23 +124,23 @@ X4_controls_string = paste(
   "+ unemprate + log_revenue_pp + mn_wage + democrat_gov + PovertyRate + AFDCTANFRecipients + unemprate_mis + log_revenue_pp_mis + mn_wage_mis + democrat_gov_mis + PovertyRate_mis + AFDCTANFRecipients_mis" # X4 controls
 )
 
+# run full covariate regression
 formula_A3_col4 = as.formula(paste("psid_work_hours ~ Texp_group3 +", X4_controls_string))
 reg_A3_col4 = lm(formula_A3_col4, data = cleaned, weights = lon_weight)
-nobs(reg_A3_col4)
 
+# clustered SEs
 ct_A3_col4 = vcovCR(reg_A3_col4, cluster = cleaned$state, type = "CR1S")
 robust_res_A3_col4 = coeftest(reg_A3_col4, vcov = ct_A3_col4)
 
 event_coefs = robust_res_A3_col4[grepl("^Texp_group3", rownames(robust_res_A3_col4)), ]
-print(event_coefs)
 
 event_years = gsub("Texp_group3", "", rownames(event_coefs))
 event_years = as.numeric(event_years)
 
 plot_data = data.frame(
-  year = c(event_years, 0), # Add the reference year (0)
-  estimate = c(event_coefs[, 1], 0), # Add 0 for the reference group's coefficient
-  se = c(event_coefs[, 2], 0), # Add 0 for the reference group's SE
+  year = c(event_years, 0),
+  estimate = c(event_coefs[, 1], 0),
+  se = c(event_coefs[, 2], 0), 
   ci_low = c(event_coefs[, 1] - 1.96 * event_coefs[, 2], 0),
   ci_high = c(event_coefs[, 1] + 1.96 * event_coefs[, 2], 0)
 ) %>% filter(year >= -2 & year <= 6)
