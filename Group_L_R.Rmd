@@ -9,14 +9,13 @@ output: pdf_document
 library(haven)
 library(dplyr)
 library(clubSandwich)
-library(lmtest)
-library(broom)
 library(ggplot2)
 dat = read_dta("data_analysis1.dta")
 dat
 ```
 
 ```{r Initial Data Manipulations}
+# adding vars as in the Stata
 dat = dat %>% mutate(
   pre_unb = (Texp_group >= -12) & (Texp_group <= -3),
   post_unb = (Texp_group >= 7) & (Texp_group <= 12),
@@ -34,9 +33,11 @@ dat = dat %>%
   group_by(person_id) %>%
   mutate(junkcol = max(colever_ch19, na.rm = TRUE)) %>%
   ungroup()
+# matches work done in Stata (takes ~30s as groups by personID)
 ```
 
 ```{r Building Table 3 - Panel A}
+# repeat cleaning researchers do in Stata
 cleaned = dat %>% subset(
   state != "Arkansas" &
   child_1923_cah == 1 &
@@ -47,11 +48,19 @@ cleaned = dat %>% subset(
   age_psid <= 64
 ) %>%
   mutate(
-    Texp_group3 = relevel(factor(Texp_group3), ref = "0"),
-    age_psid = relevel(factor(age_psid), ref = "40"),
+    age_psid_imputed = if_else(is.na(age_psid), 40, age_psid),
+    educ_psid_imputed = if_else(is.na(educ_psid), 1, educ_psid),
+    Texp_group3 = relevel(factor(Texp_group3), ref = "0"), 
+    age_psid = relevel(factor(age_psid_imputed), ref = "40"), # imputes to not shed rows
+    educ_psid = relevel(factor(educ_psid_imputed), ref = "1"), 
+    marital1 = as.numeric(marital_status_psid == 1),
+    marital3 = as.numeric(marital_status_psid == 3),
+    marital4 = as.numeric(marital_status_psid == 4),
+    marital5 = as.numeric(marital_status_psid == 5),
+    marital6 = as.numeric(marital_status_psid == 6),
     white_psid_mis = as.numeric(is.na(white_psid)),
-    educ_psid_mis = as.numeric(is.na(educ_psid)),
-    age_psid_mis = as.numeric(is.na(age_psid)),
+    educ_psid_mis = as.numeric(is.na(educ_psid)), 
+    age_psid_mis = as.numeric(is.na(age_psid)), 
     marital_status_psid_mis = as.numeric(is.na(marital_status_psid)),
     numkids_psid_mis = as.numeric(is.na(numkids_psid)),
     head_hh_psid_mis = as.numeric(is.na(head_hh_psid)),
@@ -63,12 +72,27 @@ cleaned = dat %>% subset(
     mn_wage_mis = as.numeric(is.na(mn_wage)),
     democrat_gov_mis = as.numeric(is.na(democrat_gov)),
     PovertyRate_mis = as.numeric(is.na(PovertyRate)),
-    AFDCTANFRecipients_mis = as.numeric(is.na(AFDCTANFRecipients))
+    AFDCTANFRecipients_mis = as.numeric(is.na(AFDCTANFRecipients)),
+    white_psid = if_else(is.na(white_psid), 0, white_psid),
+    numkids_psid = if_else(is.na(numkids_psid), 0, numkids_psid),
+    head_hh_psid = if_else(is.na(head_hh_psid), 0, head_hh_psid),
+    needsp = if_else(is.na(needsp), 0, needsp),
+    tuition_state_public4 = if_else(is.na(tuition_state_public4), 0, tuition_state_public4),
+    tuition_state_public2 = if_else(is.na(tuition_state_public2), 0, tuition_state_public2),
+    unemprate = if_else(is.na(unemprate), 0, unemprate),
+    log_revenue_pp = if_else(is.na(log_revenue_pp), 0, log_revenue_pp),
+    mn_wage = if_else(is.na(mn_wage), 0, mn_wage),
+    democrat_gov = if_else(is.na(democrat_gov), 0, democrat_gov),
+    PovertyRate = if_else(is.na(PovertyRate), 0, PovertyRate),
+    AFDCTANFRecipients = if_else(is.na(AFDCTANFRecipients), 0, AFDCTANFRecipients)
   )
 
+# run WLS regression on simplest model (only year and state FEs)
 reg = lm(psid_work_hours ~ pre_unb + post_unb + post_bal + factor(state) + factor(year), data=cleaned, weights=lon_weight)
 
-ct = vcovCR(reg, cluster=cleaned$state, type="CR1")
+# uses package for state-clustered SEs
+# the CR1S argument mimics the DoF correction Stata uses, giving an identical SE
+ct = vcovCR(reg, cluster=cleaned$state, type="CR1S")
 robust_res = coeftest(reg, vcov = ct)
 
 pretreat_mean = weighted.mean(
@@ -80,64 +104,78 @@ pretreat_mean = weighted.mean(
 coef_post = robust_res["post_balTRUE", 1]
 se_post = robust_res["post_balTRUE", 2]
 
+# replicating table 3 column 1 panel A
 cat("Table 3. Effect of merit aid on employment\n")
 cat("Dependent variable: annual hours of work\n\n")
 cat("After merit aid:", round(coef_post, 1), "\n")
-cat("[", round(se_post, 2), "]\n")
+cat("[", round(se_post, 2), "]",
+    ifelse(2 * (1 - pnorm(abs(coef_post / se_post))) < 0.05, "**", ""),
+    "\n") # we demonstrate same significance level as in paper
 cat("Observations:", nobs(reg), "\n")
 cat("Pre-treatment mean:", round(pretreat_mean, 0), "\n")
 ```
 
 ```{r Building Figure 1 - Panel A}
-formula = psid_work_hours ~ Texp_group3 +
-  factor(state) + factor(year) +
-  white_psid + factor(educ_psid) + factor(age_psid) +
-  factor(marital_status_psid) +
-  numkids_psid + head_hh_psid +
-  white_psid_mis + educ_psid_mis + age_psid_mis +
-  marital_status_psid_mis + numkids_psid_mis + head_hh_psid_mis +
-  needsp_mis + tuition_state_public4 + tuition_state_public2 +
-  needsp + tuition_state_public4_mis + tuition_state_public2_mis +
-  unemprate + log_revenue_pp + mn_wage + democrat_gov +
-  PovertyRate + AFDCTANFRecipients +
-  unemprate_mis + log_revenue_pp_mis + mn_wage_mis +
-  democrat_gov_mis + PovertyRate_mis + AFDCTANFRecipients_mis
-
-# --- Estimate with weights and clustered SEs
-reg2 <- lm(formula, data = cleaned, weights = lon_weight, clusters = state)
-
-# --- Extract treatment coefficients
-coef_table <- tidy(reg2, conf.int = TRUE, vcov = cluster_vcov)
-coef_treat <- subset(coef_table, grepl("Texp_group3", term))
-
-# --- Add dependent variable mean
-dep_mean <- weighted.mean(
-  cleaned$psid_work_hours[cleaned$Texp_group3 == 0 & cleaned$strong == 1],
-  w = cleaned$lon_weight[cleaned$Texp_group3 == 0 & cleaned$strong == 1],
-  na.rm = TRUE
+X4_controls_string = paste(
+  "factor(state) + factor(year)", # X1 controls
+  "+ white_psid + factor(educ_psid) + factor(age_psid) + marital1 + marital3 + marital4 + marital5 + marital6 + numkids_psid + head_hh_psid + white_psid_mis + educ_psid_mis + age_psid_mis + marital_status_psid_mis + numkids_psid_mis + head_hh_psid_mis", # X2 controls
+  "+ needsp_mis + tuition_state_public4 + tuition_state_public2 + needsp + tuition_state_public4_mis + tuition_state_public2_mis", # X3 controls
+  "+ unemprate + log_revenue_pp + mn_wage + democrat_gov + PovertyRate + AFDCTANFRecipients + unemprate_mis + log_revenue_pp_mis + mn_wage_mis + democrat_gov_mis + PovertyRate_mis + AFDCTANFRecipients_mis" # X4 controls
 )
 
-list(
-  treatment_effects = coef_treat,
-  dependent_variable_mean = dep_mean
+formula_A3_col4 = as.formula(paste("psid_work_hours ~ Texp_group3 +", X4_controls_string))
+reg_A3_col4 = lm(formula_A3_col4, data = cleaned, weights = lon_weight)
+nobs(reg_A3_col4)
+
+ct_A3_col4 = vcovCR(reg_A3_col4, cluster = cleaned$state, type = "CR1S")
+robust_res_A3_col4 = coeftest(reg_A3_col4, vcov = ct_A3_col4)
+
+event_coefs = robust_res_A3_col4[grepl("^Texp_group3", rownames(robust_res_A3_col4)), ]
+print(event_coefs)
+
+event_years = gsub("Texp_group3", "", rownames(event_coefs))
+event_years = as.numeric(event_years)
+
+plot_data = data.frame(
+  year = c(event_years, 0), # Add the reference year (0)
+  estimate = c(event_coefs[, 1], 0), # Add 0 for the reference group's coefficient
+  se = c(event_coefs[, 2], 0), # Add 0 for the reference group's SE
+  ci_low = c(event_coefs[, 1] - 1.96 * event_coefs[, 2], 0),
+  ci_high = c(event_coefs[, 1] + 1.96 * event_coefs[, 2], 0)
+) %>% filter(year >= -2 & year <= 6)
+
+custom_labels = c(
+  "-6 to -5",
+  "-4 to -3",
+  "-2 to -1",
+  "0 to 1",
+  "2 to 3",
+  "4 to 5",
+  "6 to 7",
+  "8 to 9",
+  "10 to 11"
 )
 
-
-# coef_table = tidy(reg2, conf.int = TRUE, vcov = cluster_vcov)
-# coef_treat = subset(coef_table, grepl("Texp_group3", term))
-coef_treat$group = gsub("factor\\(Texp_group3\\)", "", coef_treat$term)
-coef_treat$group = gsub("_", " ", coef_treat$group)
-
-p = ggplot(coef_treat, aes(x = group, y = estimate)) +
-   geom_hline(yintercept = 0, color = "black") +
-   geom_line(aes(group = 1), color = "steelblue", size = 1) +
-   geom_point(size = 2, color = "steelblue") +
-   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "steelblue") +
-   labs(
-     x = NULL,
-     y = "Coefficient on Texp_group3",
-     title = "Figure 1 Panel A – Mothers of College-Age Children"
-   ) +
-   theme_minimal()
-p
+figure1A = ggplot(plot_data, aes(x = year, y = estimate)) +
+  geom_line(color = "darkblue", linewidth = 0.5) +
+  geom_line(aes(y = ci_high), color = "lightblue", linetype = "dashed", linewidth = 1.2) +
+  geom_point(data = filter(plot_data, year != 0), aes(y = ci_high), color = "lightblue", size = 3, shape = 1) +
+  geom_line(aes(y = ci_low), color = "lightblue", linetype = "dashed", linewidth = 1.2) +
+  geom_point(data = filter(plot_data, year != 0), aes(y = ci_low), color = "lightblue", size = 3, shape = 1) +
+  geom_point(size = 2, shape = 19, color = "darkblue") +
+  geom_hline(yintercept = 0, linetype = "solid", color = "black") +
+  geom_vline(xintercept = 0, linetype = "solid", color = "black") +
+  scale_x_continuous(breaks = sort(unique(plot_data$year)), labels = custom_labels) +
+  labs(
+    title = "Figure 1, Panel A: Effect of Merit Aid on Parental Annual Hours of Work (Mothers)",
+    subtitle = "Based on Table A3, Column 4 (All Covariates)",
+    x = "Years Since Merit Aid Introduction (Paired)",
+    y = "Coefficient on Paired Event-Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+figure1A
 ```
