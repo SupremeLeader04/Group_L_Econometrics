@@ -1,7 +1,7 @@
 ---
 title: "Group L - R Code"
 author: "Me"
-date: "2025-11-30"
+date: "2025-12-08"
 output: pdf_document
 ---
 
@@ -18,6 +18,7 @@ dat
 ```{r Initial Data Manipulations}
 # adding vars as in the Stata
 dat = dat %>% mutate(
+  # defining pre- and post- variables
   pre_unb = (Texp_group >= -12) & (Texp_group <= -3),
   post_unb = (Texp_group >= 7) & (Texp_group <= 12),
   post_bal = (Texp_group >= 1) & (Texp_group <= 6),
@@ -29,18 +30,12 @@ dat = dat %>% mutate(
   ch_young_2633 = (ch_young_age >= 26) & (ch_young_age <= 33),
   age_psid = if_else(age_psid == 0, NA_real_, age_psid)
 )
-
-dat = dat %>%
-  group_by(person_id) %>%
-  mutate(junkcol = max(colever_ch19, na.rm = TRUE)) %>%
-  ungroup()
-# matches work done in Stata (takes ~30s as groups by personID)
 ```
 
 ```{r Building Table 3 - Panel A}
 # repeat cleaning researchers do in Stata
 cleaned = dat %>% subset(
-  state != "Arkansas" &
+  state != "Arkansas" & # Arkansas removed due to short observation period
   child_1923_cah == 1 &
   sex_psid == 2 &
   ((relation_hh == 10) | (relation_hh == 20)) &
@@ -49,16 +44,23 @@ cleaned = dat %>% subset(
   age_psid <= 64
 ) %>%
   mutate(
+    # impute NAs using base category as in Stata (rather than removing rows)
     age_psid_imputed = if_else(is.na(age_psid), 40, age_psid),
     educ_psid_imputed = if_else(is.na(educ_psid), 1, educ_psid),
+    
+    # resetting reference categories
     Texp_group3 = relevel(factor(Texp_group3), ref = "0"), 
-    age_psid = relevel(factor(age_psid_imputed), ref = "40"), # imputes to not shed rows
-    educ_psid = relevel(factor(educ_psid_imputed), ref = "1"), 
+    age_psid = relevel(factor(age_psid_imputed), ref = "40"),
+    educ_psid = relevel(factor(educ_psid_imputed), ref = "1"),
+    
+    # indicators for marital status
     marital1 = as.numeric(marital_status_psid == 1),
     marital3 = as.numeric(marital_status_psid == 3),
     marital4 = as.numeric(marital_status_psid == 4),
     marital5 = as.numeric(marital_status_psid == 5),
     marital6 = as.numeric(marital_status_psid == 6),
+    
+    # indicators for missing values
     white_psid_mis = as.numeric(is.na(white_psid)),
     educ_psid_mis = as.numeric(is.na(educ_psid)), 
     age_psid_mis = as.numeric(is.na(age_psid)), 
@@ -74,6 +76,8 @@ cleaned = dat %>% subset(
     democrat_gov_mis = as.numeric(is.na(democrat_gov)),
     PovertyRate_mis = as.numeric(is.na(PovertyRate)),
     AFDCTANFRecipients_mis = as.numeric(is.na(AFDCTANFRecipients)),
+    
+    # changes NAs to 0 by default
     white_psid = if_else(is.na(white_psid), 0, white_psid),
     numkids_psid = if_else(is.na(numkids_psid), 0, numkids_psid),
     head_hh_psid = if_else(is.na(head_hh_psid), 0, head_hh_psid),
@@ -128,7 +132,7 @@ X4_controls_string = paste(
 formula_A3_col4 = as.formula(paste("psid_work_hours ~ Texp_group3 +", X4_controls_string))
 reg_A3_col4 = lm(formula_A3_col4, data = cleaned, weights = lon_weight)
 
-# clustered SEs
+# clustered SEs as before
 ct_A3_col4 = vcovCR(reg_A3_col4, cluster = cleaned$state, type = "CR1S")
 robust_res_A3_col4 = coeftest(reg_A3_col4, vcov = ct_A3_col4)
 
@@ -137,6 +141,7 @@ event_coefs = robust_res_A3_col4[grepl("^Texp_group3", rownames(robust_res_A3_co
 event_years = gsub("Texp_group3", "", rownames(event_coefs))
 event_years = as.numeric(event_years)
 
+# building data and confidence intervals to plot
 plot_data = data.frame(
   year = c(event_years, 0),
   estimate = c(event_coefs[, 1], 0),
